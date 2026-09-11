@@ -2,13 +2,13 @@
 
 A one-touch browser arcade game. Hold to inflate and rise; release to shrink and fall.
 
-## Version 3
+## Version 4
 
-- Every level has 10 gates, increased from 5. Bonus points never advance the level counter.
+- Every level has exactly 20 gates, increased from 10. Bonus points never advance the level counter.
 - Elastic balloon animation: up to 13% vertical stretch while holding and gentle squash while falling. All cosmetic skins share the same forgiving circular collision radius.
 - Sharp synthesized pop sound on collision, six level palettes, four shuffled burst effects, and ten failure messages. Adjacent repetitions are avoided even across shuffle cycles.
 - Pass a gate with under 8 logical canvas pixels of minimum clearance to earn +2 Close Shave points, once per gate. Shielded crossings do not receive this bonus. Floating text is used instead of a screen flash.
-- Gentle moving gates appear from level 2; marked updraft/downdraft zones from level 3. Movement is bounded away from the ceiling and floor.
+- Level 1 guarantees moving gates at 5, 9, 12, 16, 18, and 20, and wide visible wind zones before gates 8, 14, and 19. Later levels use denser moving hazards and stronger currents. Patterns progress through slalom turns, stepped climbs, gust sequences, and tight turns. Movement stays bounded away from the ceiling and floor.
 - Collect helium drops to equip Bubble (20), Foil star (40), or Hot air (60). Classic is free. Helium is earned in gameplay, has no cash value, and is stored only on the current browser/device.
 - One rewarded revive per run: successful completion begins a frozen 3-second countdown followed by a 2-second collision shield. Assisted runs cannot overwrite the unassisted gate record.
 - One rewarded 3x helium claim per run, adding twice the helium collected at claim time. Cancelled, skipped, failed, unavailable, or duplicate requests grant no bonus.
@@ -63,4 +63,14 @@ node --check dist/game.js
 node --test tests/puff.test.cjs
 ```
 
-Regression checks cover stage length, near-miss accounting, collectible and skin transactions, cancellation and duplicate rewards, revive countdown/shield, interstitial caps, and hazard bounds. Real-device audio, touch feel, and difficulty still require playtesting. This update does not claim measured retention improvement.
+Regression checks cover stage length, near-miss accounting, collectible and skin transactions, cancellation and duplicate rewards, revive countdown/shield, interstitial caps, and hazard bounds. Tests explicitly verify all 20 gates before each level break, guaranteed first-level hazards, increasing speed/narrower gaps, and measurable wind displacement. Real-device audio, touch feel, and difficulty still require playtesting. This update does not claim measured retention improvement.
+
+## Difficulty tuning
+
+| Level | Initial speed (logical px/s) | Initial gap (logical px) | Moving-gate amplitude | Wind acceleration |
+| --- | --- | --- | --- | --- |
+| 1 | 132 | 240 | 18 | 150 |
+| 2 | 157 | 222 | 24 | 170 |
+| 3 | 182 | 204 | 30 | 190 |
+
+Each five-gate section also slightly increases speed and narrows gaps. Later difficulty is capped to avoid endlessly shrinking gaps. Gates are generated every 2.4 seconds; the 20-gate count is identical for all levels. Next-level gates are generated only after the previous level is cleared, so leftover easy gates do not carry over. Footer version is `v4`; refresh to load the updated scripts.

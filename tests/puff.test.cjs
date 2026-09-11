@@ -10,18 +10,18 @@ function setup(){
   const sandbox={document:{hidden:false,getElementById:el,querySelectorAll:()=>skinButtons,documentElement:{style:{setProperty(){}}},addEventListener(){}},window:{addEventListener(){},matchMedia:()=>({matches:false}),PuffAds:{isAvailable:()=>false}},ResizeObserver:class{observe(){}},devicePixelRatio:1,localStorage:{getItem:k=>memory.get(k)??null,setItem:(k,v)=>memory.set(k,v)},requestAnimationFrame(){},performance:{now:()=>1000},crypto:{getRandomValues:a=>a.fill(1234)},HTMLButtonElement:class{},setTimeout,clearTimeout,AbortController,console};
   vm.createContext(sandbox);
   const source=fs.readFileSync(path.join(__dirname,'../dist/game.js'),'utf8');
-  vm.runInContext(source+`\nglobalThis.t={start,tick,die,draw,addGate,buySkin,primaryAction,requestRevive,requestTriple,continueFlight,get:()=>({state,y,vy,r,score,points,shield,reviveUsed,revived,runHelium,tripleUsed,best,bagData:JSON.parse(JSON.stringify(bagData)),gates,activeSinceAd,completedRuns}),set:(v)=>{if(v.score!==undefined)score=v.score;if(v.y!==undefined)y=v.y;if(v.gates!==undefined)gates=v.gates;if(v.runHelium!==undefined)runHelium=v.runHelium;if(v.balance!==undefined)bagData.balance=v.balance;if(v.activeSinceAd!==undefined)activeSinceAd=v.activeSinceAd;},cancel:()=>adController?.abort()};`,sandbox);
+  vm.runInContext(source+`\nglobalThis.t={difficulty,start,tick,die,draw,addGate,buySkin,primaryAction,requestRevive,requestTriple,continueFlight,get:()=>({state,y,vy,r,score,points,shield,reviveUsed,revived,runHelium,tripleUsed,best,bagData:JSON.parse(JSON.stringify(bagData)),gates,activeSinceAd,completedRuns}),set:(v)=>{if(v.score!==undefined)score=v.score;if(v.y!==undefined)y=v.y;if(v.gates!==undefined)gates=v.gates;if(v.runHelium!==undefined)runHelium=v.runHelium;if(v.balance!==undefined)bagData.balance=v.balance;if(v.activeSinceAd!==undefined)activeSinceAd=v.activeSinceAd;},cancel:()=>adController?.abort()};`,sandbox);
   return {g:sandbox.t,el,sandbox,memory};
 }
 function gate(x=10,extra={}){return {x,base:340,center:340,gap:230,amplitude:0,phase:0,closest:Infinity,passed:false,shielded:false,token:null,wind:0,...extra}}
 function die(g){g.die();for(let i=0;i<100;i++)g.tick(1/120);assert.equal(g.get().state,'over')}
-test('all stages contain exactly 10 gates, independent of bonus points',()=>{
+test('all stages contain exactly 20 gates, independent of bonus points',()=>{
   const {g}=setup();g.start();
-  for(let i=1;i<=30;i++){
+  for(let i=1;i<=60;i++){
     g.set({y:340,gates:[gate(10,{closest:3})]});g.tick(1/120);
     assert.equal(g.get().score,i);assert.equal(g.get().points,i*3);
-    assert.equal(g.get().state,i%10===0?'level':'playing');
-    if(i%10===0){g.continueFlight();for(let n=0;n<181;n++)g.tick(1/120)}
+    assert.equal(g.get().state,i%20===0?'level':'playing');
+    if(i%20===0){g.continueFlight();for(let n=0;n<181;n++)g.tick(1/120)}
   }
 });
 test('near miss awards once; ordinary and shielded passage do not get bonus',()=>{
@@ -54,8 +54,36 @@ test('forced interstitial only after fifth completed attempt and at least 120s a
   for(let i=1;i<=5;i++){die(g);if(i===5)g.set({activeSinceAd:121});await g.primaryAction();assert.equal(ads,i===5?1:0)}
   for(let i=0;i<5;i++){die(g);await g.primaryAction()}assert.equal(ads,1);
 });
-test('moving gates and wind appear only in later levels and stay within vertical bounds',()=>{
-  const {g}=setup();g.start();for(let i=0;i<30;i++)g.addGate();assert(g.get().gates.every(g=>g.amplitude===0&&g.wind===0));
-  g.set({score:20,gates:[]});for(let i=0;i<100;i++)g.addGate();assert(g.get().gates.some(g=>g.amplitude>0));assert(g.get().gates.some(g=>g.wind));
-  for(const gg of g.get().gates){assert(gg.base-gg.amplitude-gg.gap/2>82);assert(gg.base+gg.amplitude+gg.gap/2<628)}g.draw(1000);
+test('level 1 guarantees six moving gates and three winds, and generation stops at 20',()=>{
+  const {g}=setup();g.start();for(let i=0;i<30;i++)g.addGate();
+  const gates=g.get().gates;assert.equal(gates.length,20);
+  assert.deepEqual(Array.from(gates.filter(x=>x.wind),x=>x.ordinal),[8,14,19]);
+  assert.equal(gates.filter(x=>x.amplitude>0).length,6);
+  for(const gg of gates){assert(gg.base-gg.amplitude-gg.gap/2>82);assert(gg.base+gg.amplitude+gg.gap/2<628)}
+  g.draw(1000);
+});
+test('difficulty increases materially: speed, gap, hazard motion and wind',()=>{
+  const {g}=setup();const first=g.difficulty(0,1),second=g.difficulty(1,1),third=g.difficulty(2,1);
+  assert(second.speed>=first.speed+20);assert(third.speed>second.speed);
+  assert(second.gap<=first.gap-15);assert(third.gap<second.gap);
+  assert(second.amplitude>first.amplitude);assert(second.windForce>first.windForce);
+  assert(g.difficulty(0,16).speed>first.speed);assert(g.difficulty(0,16).gap<first.gap);
+});
+test('a wind zone visibly changes the flight trajectory',()=>{
+  const calm=setup().g,breezy=setup().g;
+  for(const [g,wind] of [[calm,0],[breezy,1]]){
+    g.start();g.set({gates:[gate(390*.26+145,{wind,windForce:150,windWidth:190})]});
+    for(let i=0;i<60;i++)g.tick(1/120);
+    assert.equal(g.get().state,'playing');
+  }
+  assert(breezy.get().y-calm.get().y>10);
+});
+test('new levels generate their own hazards; all level shapes stay in bounds',()=>{
+  const {g}=setup();g.start();
+  for(let stage=0;stage<8;stage++){
+    g.set({score:stage*20,gates:[]});for(let i=0;i<20;i++)g.addGate();
+    const gates=g.get().gates;assert.equal(gates.length,20);assert(gates.every(x=>x.stage===stage));
+    if(stage>0){assert(gates.filter(x=>x.amplitude>0).length>=16);assert(gates.some(x=>x.wind));}
+    for(const gg of gates){assert(gg.base-gg.amplitude-gg.gap/2>82);assert(gg.base+gg.amplitude+gg.gap/2<628)}
+  }
 });

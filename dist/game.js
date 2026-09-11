@@ -1,8 +1,9 @@
 const $ = id => document.getElementById(id);
 const canvas = $('game'), ctx = canvas.getContext('2d');
-const LEVEL_GATES = 10, GATE_WIDTH = 49, NEAR_MISS_PX = 8;
+const LEVEL_GATES = 20, GATE_WIDTH = 49, NEAR_MISS_PX = 8;
 const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 let W=960, H=680, state='ready', held=false, y=340, vy=0, r=21, stretch=1;
+let generatedGates=0, lastWind=0;
 let gates=[], score=0, points=0, clock=0, spawn=0, last=0, acc=0, seed=1;
 let sound=true, audio=null, particles=[], floating=[], diedAt=0;
 let deathAge=0, burstKind=0, burstX=0, burstY=0, deathMessage=null;
@@ -79,7 +80,7 @@ function burstSound(){
 }
 function soundLabel(){$('sound').textContent=sound?'Sound on':'Sound off';$('sound').setAttribute('aria-label',sound?'Disable sound':'Enable sound');$('sound').setAttribute('aria-pressed',String(sound))}
 function updateHud(){
-  document.documentElement.style.setProperty('--accent',theme().accent);$('world').textContent=theme().name;
+  document.documentElement.style.setProperty('--accent',theme().accent);$('world').textContent=challengeLabel();
   $('score').textContent=String(score).padStart(2,'0');$('best').textContent=String(best).padStart(2,'0');
   $('level').textContent='LEVEL '+String(levelIndex()+1).padStart(2,'0');
   $('dots').textContent=`${score%LEVEL_GATES} / ${LEVEL_GATES} gates`;
@@ -111,7 +112,7 @@ function showResults(){
 }
 function start(){
   if(adBusy)return;
-  runId++;state='playing';held=false;y=H/2;vy=0;r=21;stretch=1;score=0;points=0;clock=0;gates=[];particles=[];floating=[];spawn=.65;
+  runId++;state='playing';held=false;y=H/2;vy=0;r=21;stretch=1;score=0;points=0;clock=0;generatedGates=0;lastWind=0;gates=[];particles=[];floating=[];spawn=.65;
   deathMessage=null;reviveUsed=false;revived=false;tripleUsed=false;runHelium=0;runCounted=false;shield=0;wind=0;
   seed=crypto.getRandomValues(new Uint32Array(1))[0];acc=0;
   $('overlay').hidden=true;$('landingAd').hidden=true;$('wardrobe').hidden=true;$('pause').disabled=false;$('pause').textContent='Pause Ⅱ';
@@ -119,8 +120,9 @@ function start(){
 }
 function levelBreak(){
   state='level';held=false;vy=0;
-  const next=levelIndex()+1,hint=next===2?'Gentle moving gates ahead.':next===3?'Watch for striped wind zones.':'Keep your flow.';
-  show(`Level ${levelIndex()} cleared!`,`${score} gates in one flight. Next: ${theme().name}. ${hint}`,'Next level','TEN GATES. ONE GREAT FLIGHT.');
+  const hint=`${stageNames[Math.min(levelIndex(),stageNames.length-1)]}: faster flight, tighter gaps and stronger currents.`;
+  gates=[];spawn=.65;wind=0;lastWind=0;
+  show(`Level ${levelIndex()} cleared!`,`${score} gates in one flight. Next: ${theme().name}. ${hint}`,'Next level','TWENTY GATES. ONE GREAT FLIGHT.');
   $('pause').disabled=true;melody([523,659,784,1047]);
 }
 function continueFlight(seconds=1.5){state='countdown';held=false;countdown=countdownTotal=seconds;acc=0;$('overlay').hidden=true;$('wardrobe').hidden=true;$('pause').disabled=true}
@@ -187,15 +189,42 @@ async function primaryAction(){
     start();
   }else if(state==='ready')start();
 }
+const stageNames=['Learn the currents','Slalom climb','Moving ladders','Gust gauntlet','Tight turns','Storm mix'];
+function difficulty(stage=levelIndex(),ordinal=score%LEVEL_GATES+1){
+  const phase=Math.min(3,Math.floor((ordinal-1)/5));
+  return {speed:Math.min(260,132+stage*25+phase*4),gap:Math.max(148,240-stage*18-phase*5),
+    amplitude:Math.min(42,18+stage*6),frequency:Math.min(1.65,.8+stage*.14),
+    windForce:Math.min(230,150+stage*20),interval:2.4};
+}
+function challengeLabel(){
+  if(levelIndex()===0){const n=score%LEVEL_GATES;return n<4?'Find your rhythm':n<7?'Moving gates ahead':n<13?'Ride the first breeze':'Wind + moving gates'}
+  return stageNames[Math.min(levelIndex(),stageNames.length-1)];
+}
 function addGate(){
-  const level=levelIndex(),gap=230-Math.min(level,10)*6;
-  const prev=gates.at(-1)?.base??H/2;
-  const margin=gap/2+22+18;
-  const base=Math.max(82+margin,Math.min(H-52-margin,prev+(rand()-.5)*140));
-  const moving=level>=1&&rand()<.4;
-  const g={x:W+50,base,center:base,gap,phase:rand()*Math.PI*2,amplitude:moving?Math.min(22,12+level*2):0,passed:false,closest:Infinity,shielded:false};
-  g.token=rand()<.65?{offset:(rand()<.5?-1:1)*(gap/2-42),taken:false}:null;
-  g.wind=level>=2&&rand()<.3?(rand()<.5?-1:1):0;gates.push(g);
+  // Do not pre-generate next-level gates at the previous level's difficulty.
+  if(generatedGates>=(levelIndex()+1)*LEVEL_GATES)return false;
+  const stage=levelIndex(),ordinal=generatedGates%LEVEL_GATES+1,d=difficulty(stage,ordinal);
+  const moving=stage===0?[5,9,12,16,18,20].includes(ordinal):ordinal%5!==1;
+  const windy=stage===0?[8,14,19].includes(ordinal):stage===1?ordinal%4===0:ordinal%3===0;
+  const amplitude=moving?d.amplitude:0,margin=d.gap/2+amplitude+18;
+  const low=82+margin,high=H-52-margin,mid=(low+high)/2;
+  const range=Math.min(85,(high-low)/2),previous=gates.at(-1)?.base??mid;
+  let target;
+  switch(stage%5){
+    case 0:target=mid+Math.sin(ordinal*.75)*range*.6;break;
+    case 1:target=mid+(ordinal%2?-.85:.85)*range;break;
+    case 2:target=mid+[-1,-.35,.35,1,.35,-.35][(ordinal-1)%6]*range;break;
+    case 3:target=mid+Math.sin(ordinal*1.25)*range;break;
+    default:target=mid+((ordinal%4)<2?-1:1)*range;
+  }
+  target+=(rand()-.5)*20;
+  const base=Math.max(low,Math.min(high,previous+Math.max(-95,Math.min(95,target-previous))));
+  const g={x:W+50,base,center:base,gap:d.gap,phase:rand()*Math.PI*2,amplitude,
+    frequency:d.frequency,stage,ordinal,passed:false,closest:Infinity,shielded:false};
+  g.token=rand()<.65?{offset:(rand()<.5?-1:1)*(d.gap/2-42),taken:false}:null;
+  g.wind=windy?((Math.floor(ordinal/(stage===0?6:3))%2)?-1:1):0;
+  g.windForce=d.windForce;g.windWidth=Math.min(245,190+stage*15);
+  generatedGates++;gates.push(g);return true;
 }
 function tick(dt){
   particles=particles.filter(p=>p.life>0);for(const p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;p.angle+=dt*4;if(burstKind===1)p.vy+=400*dt}
@@ -204,13 +233,14 @@ function tick(dt){
   if(state==='countdown'){if(document.hidden)return;countdown-=dt;if(countdown<=0){state='playing';$('pause').disabled=false;tone(700)}return}
   if(state!=='playing')return;
   clock+=dt;activeSinceAd+=dt;shield=Math.max(0,shield-dt);
-  const level=levelIndex(),speed=125+Math.min(level,12)*7,x=W*.26;
-  spawn-=dt;if(spawn<=0){addGate();spawn=2.2}
-  for(const g of gates){g.x-=speed*dt;g.center=g.base+Math.sin(clock*.9+g.phase)*g.amplitude}
-  const zone=gates.find(g=>g.wind&&x>g.x-150&&x<g.x-35);wind=zone?zone.wind*65:0;
+  const d=difficulty(),speed=d.speed,x=W*.26;
+  spawn-=dt;if(spawn<=0){addGate();spawn=d.interval}
+  for(const g of gates){g.x-=speed*dt;g.center=g.base+Math.sin(clock*(g.frequency??.9)+g.phase)*g.amplitude}
+  const zone=gates.find(g=>g.wind&&x>g.x-(g.windWidth??190)-25&&x<g.x-25);wind=zone?zone.wind*(zone.windForce??150):0;
+  if(wind&&wind!==lastWind)floatText(wind<0?'↑ UPDRAFT':'↓ DOWNDRAFT',W/2,165,'#a4fcff');lastWind=wind;
   if(wind)$('status').textContent=wind<0?'↑ Updraft · release a little earlier':'↓ Downdraft · hold a little longer';
   else if(shield>0)$('status').textContent='Second chance shield · '+shield.toFixed(1)+'s';
-  else $('status').textContent='Hold to rise · Release to fall';
+  else $('status').textContent=challengeLabel();
   r+=((held?30:17)-r)*Math.min(1,dt*7);
   const desiredStretch=reduced?1:held?1.13:vy>30?.93:1;
   stretch+=(desiredStretch-stretch)*Math.min(1,dt*11);
@@ -268,9 +298,16 @@ function draw(t){
   rect(0,79,W,3,0,'#b0d5df55');rect(0,H-52,W,3,0,'#b0d5df55');
   for(const g of gates){
     if(g.wind){
-      rect(g.x-150,90,115,H-150,9,'#d2fcff15');ctx.strokeStyle='#c7ffff55';ctx.lineWidth=1;
-      for(let j=0;j<6;j++){const yy=120+j*78+(reduced?0:((clock*g.wind*30)%35));ctx.beginPath();ctx.moveTo(g.x-130,yy);ctx.lineTo(g.x-55,yy);ctx.stroke()}
-      ctx.fillStyle='#d3ffff';ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.fillText(g.wind<0?'↑ UPDRAFT':'↓ DOWNDRAFT',g.x-92,125);
+      const width=g.windWidth??190,left=g.x-width-25,right=g.x-25;
+      const active=W*.26>left&&W*.26<right;
+      rect(left,91,width,H-148,9,active?'#76edff45':'#76edff25');
+      ctx.save();ctx.beginPath();ctx.rect(left,91,width,H-148);ctx.clip();
+      ctx.strokeStyle=active?'#bfffffcc':'#bfffff80';ctx.lineWidth=2;
+      for(let col=0;col<4;col++)for(let j=0;j<8;j++){
+        const xx=left+25+col*55,yy=100+((j*80+(reduced?0:clock*g.wind*95))%560+560)%560;
+        ctx.beginPath();ctx.moveTo(xx,yy-g.wind*18);ctx.lineTo(xx,yy+g.wind*10);ctx.lineTo(xx-5,yy+g.wind*4);ctx.moveTo(xx,yy+g.wind*10);ctx.lineTo(xx+5,yy+g.wind*4);ctx.stroke();
+      }
+      ctx.restore();ctx.fillStyle='#eaffff';ctx.font='bold 14px sans-serif';ctx.textAlign='center';ctx.fillText(g.wind<0?'↑ UPDRAFT':'↓ DOWNDRAFT',(left+right)/2,118);
     }
     const top=g.center-g.gap/2,bot=g.center+g.gap/2;
     rect(g.x,82,GATE_WIDTH,top-82,9,palette.gate);rect(g.x,bot,GATE_WIDTH,H-52-bot,9,palette.gate);
