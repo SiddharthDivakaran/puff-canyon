@@ -1,6 +1,9 @@
 const $ = id => document.getElementById(id);
 const canvas = $('game'), ctx = canvas.getContext('2d');
-const LEVEL_GATES = 20, GATE_WIDTH = 49, NEAR_MISS_PX = 8;
+const LEVEL_GATES = 20, TOTAL_LEVELS = 100, GATE_WIDTH = 49, NEAR_MISS_PX = 8;
+const courses=globalThis.PuffLevels;
+let selectedStage=0, unlocked=1, crowns=[], ranked=false, rankedSession=null, rankResult=null, rankPosting=null, runStartStage=0;
+try {const progress=JSON.parse(localStorage.getItem('puff-journey-v1')||'null');if(progress){unlocked=Math.max(1,Math.min(100,Math.floor(Number(progress.unlocked))||1));selectedStage=unlocked-1;crowns=(progress.crowns||[]).filter(n=>Number.isInteger(n)&&n>=0&&n<100)}}catch{}
 const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 let W=960, H=680, state='ready', held=false, y=340, vy=0, r=21, stretch=1;
 let generatedGates=0, lastWind=0;
@@ -15,21 +18,14 @@ let bagData={balance:0,owned:['classic'],selected:'classic'}, best=0;
 const skinPrices={classic:0,bubble:20,star:40,airship:60};
 const skinNames={classic:'Classic',bubble:'Bubble',star:'Foil star',airship:'Hot air'};
 try {
-  best=Math.max(0,Number(localStorage.getItem('puff-best-v1'))||0);
+  best=Math.max(0,Number(localStorage.getItem('puff-ranked-best-v5'))||0);
   sound=localStorage.getItem('puff-sound')!=='false';
   const saved=JSON.parse(localStorage.getItem('puff-collection-v1')||'null');
   if(saved){bagData.balance=Math.max(0,Math.floor(Number(saved.balance)||0));bagData.owned=[...new Set(['classic',...(Array.isArray(saved.owned)?saved.owned:[]).filter(s=>s in skinPrices)])];bagData.selected=bagData.owned.includes(saved.selected)?saved.selected:'classic'}
 } catch {}
-const palettes=[
-{name:'Electric lagoon',top:'#14285b',bottom:'#087f96',gate:'#ff5da2',cap:'#ffb5db',ball:'#ffcd43',shine:'#fff3b0',accent:'#4bf2df'},
-{name:'Sunset soda',top:'#541879',bottom:'#d74973',gate:'#36d5cd',cap:'#9ffff0',ball:'#ffe061',shine:'#fff8ca',accent:'#ffd166'},
-{name:'Cosmic candy',top:'#221359',bottom:'#6139a1',gate:'#ffa444',cap:'#ffe0a1',ball:'#f56bd7',shine:'#ffd9f8',accent:'#71e6ff'},
-{name:'Blue raspberry',top:'#102765',bottom:'#126fd1',gate:'#a7ed48',cap:'#e2ffac',ball:'#ff856a',shine:'#ffe6bd',accent:'#ffafd2'},
-{name:'Mango sunset',top:'#782745',bottom:'#d9772a',gate:'#9169f8',cap:'#d6c4ff',ball:'#57f5d2',shine:'#d3fff4',accent:'#ffe175'},
-{name:'Neon garden',top:'#103d56',bottom:'#147958',gate:'#ed70d4',cap:'#ffb9ea',ball:'#ffcb51',shine:'#fff3b9',accent:'#97efff'}];
 const failures=[['Pop goes the Puff!','That gap was playing hard to get.'],['Air today. Gone tomorrow.','A little less puff next time?'],['Well, that escalated.','Up was good. Too much up was ambitious.'],['A tiny pop. A big dream.','Your next great flight is one tap away.'],['Puff has left the chat.','Rejoining in three… two…'],['Too fabulous to fit.','Try shrinking before the next squeeze.'],['Gravity: 1. Puff: 0.','Time for a rematch.'],['Unexpected confetti!','We meant to do that. Probably.'],['A brief air-ruption.','Keep the dream inflated.'],['One puff too far.','So close. Shall we go again?']];
-function levelIndex(){return Math.floor(score/LEVEL_GATES)}
-function theme(){return palettes[levelIndex()%palettes.length]}
+function levelIndex(){return Math.min(99,Math.floor(score/LEVEL_GATES))}
+function theme(){return courses.get(levelIndex()).palette}
 function saveCollection(){try{localStorage.setItem('puff-collection-v1',JSON.stringify(bagData))}catch{}updateCollection()}
 function updateCollection(){
   $('wallet').textContent=`◆ ${bagData.balance} helium`;
@@ -41,7 +37,7 @@ function updateCollection(){
   });
 }
 function buySkin(skin){
-  if(adBusy||!['ready','over'].includes(state)||!(skin in skinPrices))return false;
+  if(adBusy||!['ready','over','complete'].includes(state)||!(skin in skinPrices))return false;
   if(!bagData.owned.includes(skin)){
     if(bagData.balance<skinPrices[skin])return false;
     bagData.balance-=skinPrices[skin];bagData.owned.push(skin);
@@ -81,10 +77,13 @@ function burstSound(){
 function soundLabel(){$('sound').textContent=sound?'Sound on':'Sound off';$('sound').setAttribute('aria-label',sound?'Disable sound':'Enable sound');$('sound').setAttribute('aria-pressed',String(sound))}
 function updateHud(){
   document.documentElement.style.setProperty('--accent',theme().accent);$('world').textContent=challengeLabel();
-  $('score').textContent=String(score).padStart(2,'0');$('best').textContent=String(best).padStart(2,'0');
-  $('level').textContent='LEVEL '+String(levelIndex()+1).padStart(2,'0');
-  $('dots').textContent=`${score%LEVEL_GATES} / ${LEVEL_GATES} gates`;
-  $('points').textContent=`${points} points${revived?' · assisted':''}`;$('runHelium').textContent=`◆ ${runHelium} helium`;
+  $('score').textContent=String(score-runStartStage*20).padStart(2,'0');$('best').textContent=String(best).padStart(2,'0');
+  $('level').textContent='LEVEL '+String(levelIndex()+1).padStart(2,'0')+' / 100';
+  $('dots').textContent=`${score===2000?20:score%LEVEL_GATES} / ${LEVEL_GATES} gates`;
+  $('points').textContent=`${points} points${ranked?' · ranked':revived?' · assisted':''}`;
+  $('difficulty').textContent=`${['Breezy','Playful','Brisk','Wild','Expert'][courses.get(levelIndex()).rating-1]} ${'◆'.repeat(courses.get(levelIndex()).rating)}`;
+  $('levelProgress').value=score===2000?20:score%20;
+  $('journeyProgress').textContent=`${crowns.length} / 100 cleared`; $('runHelium').textContent=`◆ ${runHelium} helium`;
 }
 function resize(){
   const box=canvas.getBoundingClientRect(),oldW=W;W=H*box.width/box.height;
@@ -95,35 +94,50 @@ function resize(){
 }
 function show(title,message,button,pill){
   $('title').textContent=title;$('message').textContent=message;$('start').textContent=button+' ↗';$('pill').textContent=pill;
-  $('overlay').hidden=false;$('rewards').hidden=true;$('wardrobe').hidden=state!=='over'&&state!=='ready';
+  $('overlay').hidden=false;$('rewards').hidden=true;$('wardrobe').hidden=!['over','ready','complete'].includes(state);$('rankedStart').hidden=!['over','ready','complete'].includes(state);$('postStatus').hidden=!ranked||!['over','complete'].includes(state);$('rankedHint').hidden=!['over','ready','complete'].includes(state);$('postRetry').hidden=true;
 }
 function adAvailable(kind){try{return window.PuffAds?.isAvailable(kind)===true}catch{return false}}
 function updateRewards(){
   const showRewards=state==='over';$('rewards').hidden=!showRewards;
-  $('revive').disabled=adBusy||reviveUsed||!adAvailable('revive');
+  $('revive').disabled=adBusy||ranked||reviveUsed||!adAvailable('revive');
   $('triple').disabled=adBusy||tripleUsed||runHelium===0||!adAvailable('helium');
-  $('revive').textContent=reviveUsed?'Second chance used':'Inflate & Resume (Ad)';
+  $('revive').textContent=ranked?'No revives in ranked flight':reviveUsed?'Second chance used':'Inflate & Resume (Ad)';
   $('triple').textContent=tripleUsed?'Helium tripled':'Watch Ad to 3× Helium';
   $('rewardNote').textContent=(!adAvailable('revive')&&!adAvailable('helium'))?'Rewarded ads are unavailable right now. Fly again for free.':`One revive and one helium bonus per run. ${runHelium} helium collected.`;
 }
 function showResults(){
-  state='over';show(deathMessage.title,`${score} gates · ${points} points · ${runHelium} helium. ${deathMessage.text}`,'Fly again',deathMessage.pill);
+  state='over';show(deathMessage.title,`${score-runStartStage*20} gates · ${points} points · ${runHelium} helium. ${deathMessage.text}`,'Fly again',deathMessage.pill);
   updateRewards();updateCollection();
+  if(ranked)postRankedScore();
 }
-function start(){
+
+function start(stage=selectedStage,isRanked=false){
   if(adBusy)return;
-  runId++;state='playing';held=false;y=H/2;vy=0;r=21;stretch=1;score=0;points=0;clock=0;generatedGates=0;lastWind=0;gates=[];particles=[];floating=[];spawn=.65;
+  ranked=isRanked;runStartStage=ranked?0:Math.max(0,Math.min(unlocked-1,stage));rankResult=null;
+  if(!ranked)rankedSession=null;
+  $('postStatus').textContent='';$('postStatus').hidden=true;$('postRetry').hidden=true;$('rankedStart').hidden=true;$('rankedHint').hidden=true;
+  runId++;state='playing';held=false;y=H/2;vy=0;r=21;stretch=1;score=runStartStage*20;points=0;clock=0;generatedGates=score;lastWind=0;gates=[];particles=[];floating=[];spawn=.65;
   deathMessage=null;reviveUsed=false;revived=false;tripleUsed=false;runHelium=0;runCounted=false;shield=0;wind=0;
-  seed=crypto.getRandomValues(new Uint32Array(1))[0];acc=0;
+  seed=7919+runStartStage*104729;acc=0;
   $('overlay').hidden=true;$('landingAd').hidden=true;$('wardrobe').hidden=true;$('pause').disabled=false;$('pause').textContent='Pause Ⅱ';
   $('status').textContent='Hold to rise · Release to fall';updateHud();tone(420);
 }
+function saveJourney(){try{localStorage.setItem('puff-journey-v1',JSON.stringify({unlocked,crowns}))}catch{}}
 function levelBreak(){
-  state='level';held=false;vy=0;
-  const hint=`${stageNames[Math.min(levelIndex(),stageNames.length-1)]}: faster flight, tighter gaps and stronger currents.`;
-  gates=[];spawn=.65;wind=0;lastWind=0;
-  show(`Level ${levelIndex()} cleared!`,`${score} gates in one flight. Next: ${theme().name}. ${hint}`,'Next level','TWENTY GATES. ONE GREAT FLIGHT.');
-  $('pause').disabled=true;melody([523,659,784,1047]);
+  const cleared=Math.floor(score/20)-1;
+  if(!crowns.includes(cleared))crowns.push(cleared);
+  unlocked=Math.max(unlocked,Math.min(100,cleared+2));selectedStage=Math.min(99,cleared+1);saveJourney();
+  state=score===2000?'complete':'level';held=false;vy=0;gates=[];spawn=.65;wind=0;lastWind=0;
+  seed=7919+levelIndex()*104729;
+  if(score===2000){
+    if(ranked&&!revived&&score>best){best=score;try{localStorage.setItem('puff-ranked-best-v5',String(best))}catch{}}
+    show('The sky is yours!',`100 levels conquered. ${points} points in this flight. Come back for a new record.`,'Fly again','A HUNDRED LITTLE VICTORIES');
+    if(ranked)postRankedScore();
+  }else{
+    const next=courses.get(levelIndex()),d=difficulty();
+    show(`Level ${cleared+1} cleared!`,`${next.palette.name} · ${next.title}. ${next.label}. ${Math.round(d.speed)} speed · ${Math.round(d.gap)} gap.`,'Next level',`NEXT: LEVEL ${next.number} / 100 · ${['BREEZY','PLAYFUL','BRISK','WILD','EXPERT'][next.rating-1]}`);
+  }
+  updateHud();$('pause').disabled=true;melody([523,659,784,1047]);
 }
 function continueFlight(seconds=1.5){state='countdown';held=false;countdown=countdownTotal=seconds;acc=0;$('overlay').hidden=true;$('wardrobe').hidden=true;$('pause').disabled=true}
 function pause(){
@@ -134,8 +148,8 @@ function floatText(text,x,yy,color='#fff3a4'){floating.push({text,x,y:yy,life:1.
 function die(){
   if(state!=='playing')return;
   state='burst';held=false;deathAge=0;burstX=W*.26;burstY=y;burstKind=pickBag('effect',4);diedAt=performance.now();
-  const isBest=!revived&&score>best;
-  if(isBest){best=score;try{localStorage.setItem('puff-best-v1',String(best))}catch{}}
+  const isBest=ranked&&!revived&&score>best;
+  if(isBest){best=score;try{localStorage.setItem('puff-ranked-best-v5',String(best))}catch{}}
   const phrase=failures[pickBag('message',failures.length)];
   deathMessage={title:phrase[0],text:phrase[1],pill:revived?'ASSISTED FLIGHT':isBest?'NEW PERSONAL BEST!':'ONE MORE TRY?'};
   const colors=[theme().ball,theme().cap,theme().accent,'#ffffff','#ff65a8'];
@@ -161,7 +175,7 @@ async function runAd(kind){
   if(result)activeSinceAd=0;return result;
 }
 function applyRevive(){
-  if(reviveUsed||state!=='over')return false;
+  if(ranked||reviveUsed||state!=='over')return false;
   reviveUsed=true;revived=true;held=false;vy=0;r=21;stretch=1;wind=0;particles=[];floating=[];
   const x=W*.26;
   // Move only upcoming obstacles; retain their sequence and earned score.
@@ -171,7 +185,7 @@ function applyRevive(){
   continueFlight(3);updateHud();return true;
 }
 async function requestRevive(){
-  if(state!=='over'||reviveUsed||adBusy)return;
+  if(ranked||state!=='over'||reviveUsed||adBusy)return;
   if(await runAd('revive'))applyRevive();else{showResults();$('rewardNote').textContent='Ad not completed or unavailable. Your second chance is still unused.'}
 }
 async function requestTriple(){
@@ -183,47 +197,36 @@ async function primaryAction(){
   if(adBusy)return;
   audioContext();
   if(state==='paused'||state==='level'){continueFlight();$('pause').textContent='Pause Ⅱ';return}
-  if(state==='over'){
+  if(state==='over'||state==='complete'){
     if(!runCounted){completedRuns++;runCounted=true}
-    if(completedRuns%5===0&&activeSinceAd>=120)await runAd('interstitial');
-    start();
+    if(completedRuns%5===0&&activeSinceAd>=180)await runAd('interstitial');
+    if(ranked){await startRanked();return}
+    start(state==='complete'?0:levelIndex());
   }else if(state==='ready')start();
 }
-const stageNames=['Learn the currents','Slalom climb','Moving ladders','Gust gauntlet','Tight turns','Storm mix'];
-function difficulty(stage=levelIndex(),ordinal=score%LEVEL_GATES+1){
-  const phase=Math.min(3,Math.floor((ordinal-1)/5));
-  return {speed:Math.min(260,132+stage*25+phase*4),gap:Math.max(148,240-stage*18-phase*5),
-    amplitude:Math.min(42,18+stage*6),frequency:Math.min(1.65,.8+stage*.14),
-    windForce:Math.min(230,150+stage*20),interval:2.4};
-}
+function difficulty(stage=levelIndex(),ordinal=score%LEVEL_GATES+1){return courses.difficulty(stage,ordinal)}
 function challengeLabel(){
-  if(levelIndex()===0){const n=score%LEVEL_GATES;return n<4?'Find your rhythm':n<7?'Moving gates ahead':n<13?'Ride the first breeze':'Wind + moving gates'}
-  return stageNames[Math.min(levelIndex(),stageNames.length-1)];
+  const c=courses.get(levelIndex());
+  return `${c.palette.name} · ${c.title}`;
 }
 function addGate(){
   // Do not pre-generate next-level gates at the previous level's difficulty.
-  if(generatedGates>=(levelIndex()+1)*LEVEL_GATES)return false;
+  if(score>=2000||generatedGates>=(levelIndex()+1)*LEVEL_GATES)return false;
   const stage=levelIndex(),ordinal=generatedGates%LEVEL_GATES+1,d=difficulty(stage,ordinal);
-  const moving=stage===0?[5,9,12,16,18,20].includes(ordinal):ordinal%5!==1;
-  const windy=stage===0?[8,14,19].includes(ordinal):stage===1?ordinal%4===0:ordinal%3===0;
+  const hazard=courses.hazard(stage,ordinal),moving=hazard.moving,windy=hazard.wind;
   const amplitude=moving?d.amplitude:0,margin=d.gap/2+amplitude+18;
   const low=82+margin,high=H-52-margin,mid=(low+high)/2;
   const range=Math.min(85,(high-low)/2),previous=gates.at(-1)?.base??mid;
-  let target;
-  switch(stage%5){
-    case 0:target=mid+Math.sin(ordinal*.75)*range*.6;break;
-    case 1:target=mid+(ordinal%2?-.85:.85)*range;break;
-    case 2:target=mid+[-1,-.35,.35,1,.35,-.35][(ordinal-1)%6]*range;break;
-    case 3:target=mid+Math.sin(ordinal*1.25)*range;break;
-    default:target=mid+((ordinal%4)<2?-1:1)*range;
-  }
-  target+=(rand()-.5)*20;
+  const course=courses.get(stage),pattern=course.pattern;
+  const direction=course.world%2?-1:1;
+  let target=mid+pattern[(ordinal-1+course.world)%pattern.length]*range*direction;
+  target+=(rand()-.5)*12;
   const base=Math.max(low,Math.min(high,previous+Math.max(-95,Math.min(95,target-previous))));
   const g={x:W+50,base,center:base,gap:d.gap,phase:rand()*Math.PI*2,amplitude,
     frequency:d.frequency,stage,ordinal,passed:false,closest:Infinity,shielded:false};
   g.token=rand()<.65?{offset:(rand()<.5?-1:1)*(d.gap/2-42),taken:false}:null;
-  g.wind=windy?((Math.floor(ordinal/(stage===0?6:3))%2)?-1:1):0;
-  g.windForce=d.windForce;g.windWidth=Math.min(245,190+stage*15);
+  g.wind=windy;
+  g.windForce=d.windForce;g.windWidth=Math.min(245,190+stage*.5);
   generatedGates++;gates.push(g);return true;
 }
 function tick(dt){
@@ -240,7 +243,7 @@ function tick(dt){
   if(wind&&wind!==lastWind)floatText(wind<0?'↑ UPDRAFT':'↓ DOWNDRAFT',W/2,165,'#a4fcff');lastWind=wind;
   if(wind)$('status').textContent=wind<0?'↑ Updraft · release a little earlier':'↓ Downdraft · hold a little longer';
   else if(shield>0)$('status').textContent='Second chance shield · '+shield.toFixed(1)+'s';
-  else $('status').textContent=challengeLabel();
+  else $('status').textContent=courses.get(levelIndex()).label+' · Hold ↑ Release ↓';
   r+=((held?30:17)-r)*Math.min(1,dt*7);
   const desiredStretch=reduced?1:held?1.13:vy>30?.93:1;
   stretch+=(desiredStretch-stretch)*Math.min(1,dt*11);
@@ -336,6 +339,77 @@ function draw(t){
   }
   if(state==='playing'&&clock<3){ctx.fillStyle='#ffffffd0';ctx.font='14px sans-serif';ctx.textAlign='center';ctx.fillText(held?'Release to shrink ↓':'Hold to rise ↑',W*.26,Math.min(H-90,y+r+65))}
 }
+async function api(path,body){
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),8000);
+  try{
+    const response=await fetch(path,{method:body?'POST':'GET',credentials:'same-origin',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,signal:controller.signal});
+    if(!response.headers.get('Content-Type')?.includes('application/json'))throw new Error('Leaderboard is not available on this copy of Puff. Use the public game link.');
+    const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not reach the leaderboard.');return data;
+  }finally{clearTimeout(timer)}
+}
+async function startRanked(){
+  if(adBusy||!['ready','over','complete'].includes(state))return;
+  const previous=state;state='connecting';$('start').disabled=true;$('rankedStart').disabled=true;
+  $('message').textContent='Connecting your ranked flight…';
+  try{
+    const session=await api('/api/runs',{});rankedSession=session;start(0,true);
+    $('status').textContent=`Flying as ${session.name}`;
+    if(document.hidden)pause();
+  }catch(error){
+    state=previous;
+    if(previous==='over')showResults();
+    $('message').textContent=error.name==='AbortError'?'Connection timed out. Try ranked again or choose a journey level.':error.message;
+  }finally{$('start').disabled=false;$('rankedStart').disabled=false}
+}
+async function postRankedScore(){
+  if(!ranked||!rankedSession||revived||rankPosting===runId||rankResult?.saved)return;
+  const activeRun=runId;
+  if(score===0){$('postStatus').hidden=false;$('postStatus').textContent=`${rankedSession.name} · Clear a gate to join the board.`;return}
+  rankPosting=activeRun;$('postStatus').hidden=false;$('postStatus').textContent='Saving your ranked flight…';$('postRetry').hidden=true;
+  try{
+    const result=await api('/api/scores',{token:rankedSession.token,gates:score,points,assisted:false});
+    if(activeRun===runId){rankResult=result;$('postStatus').textContent=`Saved as ${rankedSession.name}. Open Leaderboard to compare flights.`}
+  }catch{
+    if(activeRun===runId){$('postStatus').textContent='Score upload failed. Your flight is here until you fly again.';$('postRetry').hidden=false}
+  }finally{if(rankPosting===activeRun)rankPosting=null}
+}
+function renderWorld(){
+  const world=Math.max(0,Math.min(9,Number($('worldSelect').value)||0));
+  $('worldDescription').textContent=`${courses.worlds[world].name} · Levels ${world*10+1}–${world*10+10}`;
+  $('levelGrid').replaceChildren();
+  for(const course of courses.levels.slice(world*10,world*10+10)){
+    const button=document.createElement('button'),done=crowns.includes(course.index),locked=course.number>unlocked;
+    button.className='level-tile';button.disabled=locked;
+    button.setAttribute('aria-label',`Level ${course.number}: ${course.title}. ${done?'Cleared':locked?'Locked':'Available'}`);
+    if(course.index===selectedStage)button.setAttribute('aria-current','step');
+    const number=document.createElement('strong'),name=document.createElement('span'),badge=document.createElement('small');
+    number.textContent=String(course.number).padStart(2,'0');name.textContent=course.title;badge.textContent=done?'✓ Cleared':locked?'Locked':'Ready to fly';
+    button.append(number,name,badge);button.onclick=()=>{selectedStage=course.index;$('mapDialog').close();audioContext();start(selectedStage)};
+    $('levelGrid').append(button);
+  }
+}
+function openPanel(id){if(adBusy||state==='connecting'||state==='burst')return;pause();held=false;$(id).showModal()}
+async function loadBoard(){
+  $('boardStatus').textContent='Loading flights…';$('boardTable').hidden=true;$('myFlight').textContent='';$('boardRefresh').disabled=true;
+  try{
+    const data=await api('/api/leaderboard');if(!Array.isArray(data.rows))throw new Error('Leaderboard is unavailable.');
+    $('boardRows').replaceChildren();
+    data.rows.forEach((entry,index)=>{
+      const tr=document.createElement('tr');
+      for(const value of [index+1,entry.name,entry.gates,entry.points]){const td=document.createElement('td');td.textContent=String(value);tr.append(td)}
+      $('boardRows').append(tr);
+    });
+    $('boardTable').hidden=data.rows.length===0;$('boardStatus').textContent=data.rows.length?'Top 50 · Best flight per browser':'No flights yet. Start a ranked flight to set the first score.';
+    if(data.mine)$('myFlight').textContent=`You: ${data.mine.name} · ${data.mine.gates} gates · ${data.mine.points} points`;
+  }catch(error){$('boardStatus').textContent=error.name==='AbortError'?'Leaderboard timed out. Try Refresh scores.':error.message}
+  finally{$('boardRefresh').disabled=false}
+}
+$('rankedStart').onclick=startRanked;$('postRetry').onclick=postRankedScore;
+$('mapOpen').onclick=()=>{openPanel('mapDialog');$('worldSelect').value=String(Math.floor(selectedStage/10));renderWorld()};
+$('mapClose').onclick=()=>$('mapDialog').close();$('worldSelect').onchange=renderWorld;
+$('boardOpen').onclick=()=>{openPanel('boardDialog');if($('boardDialog').open)loadBoard()};
+$('boardClose').onclick=()=>$('boardDialog').close();$('boardRefresh').onclick=loadBoard;
+for(const [index,world] of courses.worlds.entries()){const option=document.createElement('option');option.value=String(index);option.textContent=`${index+1}. ${world.name}`;$('worldSelect').append(option)}
 $('start').onclick=()=>{primaryAction();$('start').blur()};
 $('pause').onclick=()=>{if(state==='paused')continueFlight();else pause()};
 $('sound').onclick=()=>{sound=!sound;soundLabel();try{localStorage.setItem('puff-sound',String(sound))}catch{}if(sound)tone(650);else if(audio)audio.suspend().catch(()=>{})};
@@ -345,14 +419,14 @@ canvas.addEventListener('pointerdown',e=>{e.preventDefault();audioContext();if(s
 window.addEventListener('pointerup',()=>held=false);window.addEventListener('pointercancel',()=>held=false);
 window.addEventListener('blur',()=>{held=false;pause()});document.addEventListener('visibilitychange',()=>{if(document.hidden)pause()});
 window.addEventListener('keydown',e=>{
-  if(e.target instanceof HTMLButtonElement)return;
+  if(e.target instanceof HTMLButtonElement||document.querySelector('dialog[open]'))return;
   if(e.code==='Escape'||e.code==='KeyP'){if(state==='playing'||state==='countdown')pause();else if(state==='paused')continueFlight();return}
   if(e.code!=='Space'&&e.code!=='ArrowUp')return;e.preventDefault();if(e.repeat)return;
-  if(state==='ready'||state==='over'||state==='paused'||state==='level')primaryAction();
+  if(state==='ready'||state==='over'||state==='complete'||state==='paused'||state==='level')primaryAction();
   if(state==='playing'){held=true;audioContext()}
 });
 window.addEventListener('keyup',e=>{if(e.code==='Space'||e.code==='ArrowUp')held=false});
 function frame(t){const dt=Math.min((t-last)/1000||0,.05);last=t;acc+=dt;while(acc>=1/120){tick(1/120);acc-=1/120}draw(t);requestAnimationFrame(frame)}
-new ResizeObserver(resize).observe(canvas);soundLabel();updateHud();updateCollection();resize();requestAnimationFrame(frame);
+new ResizeObserver(resize).observe(canvas);soundLabel();score=selectedStage*20;runStartStage=selectedStage;updateHud();updateCollection();$('start').textContent=`Fly level ${selectedStage+1} ↗`;resize();requestAnimationFrame(frame);
 const context=document.modelContext;
 if(context?.registerTool){try{Promise.resolve(context.registerTool({name:'get_puff_run',description:'Read current Puff run, stage, points and device-local helium.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute:()=>({state,gatesCleared:score,level:levelIndex()+1,gatesPerLevel:LEVEL_GATES,points,runHelium,deviceBest:best,heliumBalance:bagData.balance,revived})})).catch(()=>{})}catch{}}
